@@ -1,0 +1,12 @@
+*.class
+*.jar
+*.war
+*.ear
+*.orig
+*.iml
+*.log
+.idea/*
+target/
+nb-configuration.xml
+nbactions.xml
+nbproject/
