@@ -31,13 +31,11 @@ public class IntParameterOrderTest {
     @Test
     public void test() {
         IntParameterOrderState ord = IntParameterOrderState.INITIAL;
-        System.out.println("BASE " + ord);
 
         IntParameterOrderState ord2 = ord.withBbbb(23).withEeee(Things.DARTH_VADER)
                 .withGggg(true)
                 .withIiii(Wuggles.LAMP);
 
-        System.out.println("ORD2 " + ord2);
 
         assertSame(Things.DARTH_VADER, ord2.eeee(), ord2::toString);
         assertSame(Wuggles.LAMP, ord2.iiii(), ord2::toString);

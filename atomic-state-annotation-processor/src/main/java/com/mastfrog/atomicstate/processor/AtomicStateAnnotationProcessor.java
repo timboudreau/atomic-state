@@ -237,6 +237,10 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
             range = valueRange(origin);
         }
 
+        String boxedType() {
+            return origin.getReturnType().getKind() == TypeKind.INT ? "Integer" : capitalize(origin.getReturnType().toString());
+        }
+
         void generateWriteMethod(boolean isLong, ClassBuilder<String> cb) {
             String valType = isLong ? "long" : "int";
             String maskFieldName = name.toUpperCase() + "_MASK";
@@ -257,7 +261,7 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                     break;
 
             }
-            String boxedType = capitalize(origin.getReturnType().toString());
+            String boxedType = boxedType();
 
             String dox = "Creates a new instance of " + cb.className()
                     + " with " + name + " set to the passed value."
@@ -528,6 +532,128 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
             });
         }
 
+        private void contributeToMapClause(String varName, BlockBuilder<?> bb) {
+            if (isEnum) {
+                bb.lineComment("Use the string name of enum constants to avoid issues with")
+                        .lineComment("things like Jackson which can be configured to serialize ")
+                        .lineComment("enums as their ordinals.");
+                bb.invoke("put")
+                        .withStringLiteral(name)
+                        .withArgumentFromInvoking("name")
+                        .onInvocationOf(name)
+                        .onThis().on(varName);
+
+            } else {
+                bb.invoke("put")
+                        .withStringLiteral(name)
+                        .withArgumentFromInvoking(name)
+                        .onThis().on(varName);
+            }
+        }
+
+        private void contributeFromMapClause(boolean isLong, String resultVar, String mapVar, BlockBuilder<?> bb) {
+            String vn = name + "MapValue";
+            bb.declare(vn)
+                    .initializedByInvoking("get")
+                    .withStringLiteral(name)
+                    .on(mapVar)
+                    .as("Object");
+
+            TypeKind knd = origin.getReturnType().getKind();
+            if (isNumberKind(knd)) {
+                ClassBuilder.IfBuilder<?> iff = bb.iff().booleanExpression(vn + " != null && " + vn + " instanceof Number");
+                String unboxedName = name + boxedType() + "Value";
+                iff.declare(unboxedName)
+                        .initializedByInvoking(toUnboxedNumberMethod(knd))
+                        .on("((Number) " + vn + ")")
+                        .as(isLong ? "long" : "int");
+                if (startingBit == 0) {
+                    iff.statement(resultVar + " |= " + unboxedName);
+                } else {
+                    iff.statement(resultVar + " |= " + unboxedName + " << " + startingBitFieldName());
+                }
+                iff.endIf();
+            } else if (isEnum) {
+                String simpleTypeName = simpleName(origin.getReturnType().toString());
+                String env = name + "EnumOrdinal";
+                ClassBuilder.IfBuilder<?> iff = bb.iff().booleanExpression(vn + " != null && " + vn + " instanceof " + origin.getReturnType());
+
+                iff.declare(env).initializedByInvoking("ordinal")
+                        .on("((" + simpleTypeName + ") " + vn + ")")
+                        .as(isLong ? "long" : "int");
+
+                iff.statement(resultVar + "|= " + env + " << " + startingBitFieldName());
+
+                iff.elseIf().booleanExpression(vn + " != null && " + vn + " instanceof String")
+                        .trying(tri -> {
+                            tri.lineComment("Enum values may also be passed as strings:");
+                            tri.declare(env)
+                                    .initializedByInvoking("ordinal")
+                                    .onInvocationOf("valueOf")
+                                    .withArgument("(String) " + vn)
+                                    .on(simpleTypeName)
+                                    .as(isLong ? "long" : "int");
+                            if (startingBit == 0) {
+                                tri.statement(resultVar + " |= " + env);
+                            } else {
+                                tri.statement(resultVar + " |= " + env + " << " + startingBitFieldName());
+                            }
+
+                            tri.catching("Exception")
+                                    .lineComment("The specific purpose of toMap/fromMap is to have serialization and")
+                                    .lineComment("deserialization across possibly incompatible versions of "
+                                            + this.origin.getEnclosingElement().getSimpleName() + " - ")
+                                    .lineComment("so an invalid enum constant *should* be ignored here.")
+                                    .endTryCatch();
+                        })
+                        .endIf();
+            } else {
+                String bv = name + "BooleanValue";
+                // boolean is what's left
+                bb.declare(bv)
+                        .initializedByInvoking("equals")
+                        .withArgument(vn)
+                        .onField("TRUE").of("Boolean")
+                        .as("boolean");
+                bb.iff().booleanExpression(bv)
+                        .statement(resultVar + "|= " + (isLong ? "1L" : "1") + " << " + startingBitFieldName())
+                        .endIf();
+            }
+        }
+
+    }
+
+    static String toUnboxedNumberMethod(TypeKind knd) {
+        switch (knd) {
+            case DOUBLE:
+                return "doubleValue";
+            case FLOAT:
+                return "floatValue";
+            case INT:
+                return "intValue";
+            case BYTE:
+                return "byteValue";
+            case SHORT:
+                return "shortValue";
+            case LONG:
+                return "longValue";
+            default:
+                throw new AssertionError("Not a number kind: " + knd);
+        }
+    }
+
+    static boolean isNumberKind(TypeKind knd) {
+        switch (knd) {
+            case DOUBLE:
+            case LONG:
+            case INT:
+            case BYTE:
+            case SHORT:
+            case FLOAT:
+                return true;
+            default:
+                return false;
+        }
     }
 
     final class StateModel {
@@ -1034,7 +1160,6 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
             int totalBits = totalBitsNeeded();
             boolean isLong = totalBits > 32;
             String valueType = isLong ? "long" : "int";
-            int total = totalBitsNeeded();
 
             ClassBuilder<String> result = ClassBuilder.forPackage(utils.packageName(el))
                     .named(el.getSimpleName() + "State")
@@ -1101,7 +1226,7 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
             boolean invMaskIsZero;
             if (isLong) {
                 long allMask = 0;
-                for (int i = 0; i < total; i++) {
+                for (int i = 0; i < totalBits; i++) {
                     allMask |= 1L << i;
                 }
                 invMaskIsZero = ~allMask == 0;
@@ -1114,7 +1239,7 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                 }
             } else {
                 int allMask = 0;
-                for (int i = 0; i < total; i++) {
+                for (int i = 0; i < totalBits; i++) {
                     allMask |= 1 << i;
                 }
                 invMaskIsZero = ~allMask == 0;
@@ -1125,6 +1250,8 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                             .ofType("int");
                 }
             }
+
+            List<BitsElement> elements = toElements();
 
             result.method("validate", mth -> {
                 mth.docComment("Ensures that the passed value is valid."
@@ -1148,8 +1275,87 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                                                     .ofType("IllegalArgumentException");
                                         }).endIf();
                             }
-                            toElements().forEach(el -> el.contributeValidationClause(isLong, bb));
+                            elements.forEach(el -> el.contributeValidationClause(isLong, bb));
                         });
+            });
+
+            result.method("from", mth -> {
+                mth.docComment("Allows constructing a " + result.className() + " from "
+                        + "an implementation of the " + el.getSimpleName() + " that "
+                        + " was implemented some other way."
+                        + "\n@param original An instance of " + el.getSimpleName()
+                        + " which may or may not also be an instance of " + result.className()
+                        + "\n@return the passed instance if it is already an instance of "
+                        + result.className() + ", or a newly constructed instanceof that if it is not.");
+                mth.returning(result.className())
+                        .addArgument(this.el.getSimpleName().toString(), "original")
+                        .withModifier(PUBLIC, STATIC)
+                        .body(bb -> {
+                            bb.iff().booleanExpression("original instanceof " + result.className())
+                                    .returning("(" + result.className() + ") original")
+                                    .endIf();
+
+                            bb.declare("result")
+                                    .initializedFromField("INITIAL")
+                                    .of(result.className())
+                                    .as(result.className());
+                            elements.forEach(el -> {
+                                bb.assign("result")
+                                        .toInvocation("with" + capitalize(el.name))
+                                        .withArgumentFromInvoking(el.name)
+                                        .on("original")
+                                        .on("result");
+                            });
+                            bb.returning("result");
+                        });
+            });
+
+            result.method("toMap", mth -> {
+                result.importing(Map.class, TreeMap.class);
+                mth.returning("Map<String, Object>")
+                        .docComment("Returns a Map-based representation of the current contents of this "
+                                + result.className() + " which may be more suitable for JSON representation, or "
+                                + "long-term persistence which may be deserialized by code running a "
+                                + "different version of " + this.el.getSimpleName()
+                                + "with different fields."
+                                + "\n@return A Map where the keys are method names from "
+                                + el.getSimpleName() + " and the values are the values returned "
+                                + " by calls to the those methods, on this instance, at this time"
+                        )
+                        .withModifier(PUBLIC)
+                        .body(bb -> {
+                            bb.declare("result")
+                                    .initializedWithNew(nb -> {
+                                        nb.ofType("TreeMap<>");
+                                    }).as("Map<String,Object>");
+                            elements.forEach(el -> el.contributeToMapClause("result", bb));
+                            bb.returning("result");
+                        });
+            });
+
+            result.method("fromMap", mth -> {
+                mth.withModifier(PUBLIC, STATIC)
+                        .addArgument("Map<String,Object>", "map")
+                        .returning(result.className())
+                        .docComment("Create an instance of this class from a (possibly serialized) Map, where "
+                                + "the map keys are method names on " + el.getSimpleName() + " and the values are "
+                                + "objects (perhaps boxed numbers or booleans) of the values."
+                                + "Unknown keys and values of incorrect types are ignored; if the type is a <code>Number</code>, "
+                                + "then the appropriate conversion method from <code>java.lang.Number</code> is used."
+                                + "If the value for an enum type is a String, then the corresponding enum constant "
+                                + "will be used, and it the value will be ignored if it is unrecognized."
+                                + "\n@param map A map"
+                                + "\n@return An instance of " + result.className())
+                        .body(bb -> {
+                            bb.declare("result").initializedWith(isLong ? "0L" : "0")
+                                    .as(isLong ? "long" : "int");
+                            elements.forEach(el -> el.contributeFromMapClause(isLong, "result", "map", bb));
+                            bb.returningNew(nb -> {
+                                nb.withArgument("result")
+                                        .ofType(result.className());
+                            });
+                        });
+                ;
             });
 
             result.overridePublic("hashCode", hc -> {

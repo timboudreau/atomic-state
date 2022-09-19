@@ -15,7 +15,7 @@
 
     <groupId>com.mastfrog.atomicstate</groupId>
     <artifactId>atomic-state-parent</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
 
     <name>Atomic State (modules)</name>
     <packaging>pom</packaging>

@@ -23,6 +23,7 @@
  */
 package com.mastfrog.atomicstate;
 
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,26 +34,31 @@ public class AtomicStateTest {
         StatelyState st = StatelyState.INITIAL;
         assertEquals(0, st.age(), st::toString);
         assertEquals(0, st.number(), st::toString);
+        checkMapSer(st);
 
         assertFalse(st.isCool());
         StatelyState st2 = st.withIsCool(true);
 
         assertTrue(st2.isCool(), st2::toString);
+        checkMapSer(st2);
 
         StatelyState st3 = st2.withAge(32);
         assertTrue(st3.isCool(), st3::toString);
         assertEquals(32, st3.age(), st3::toString);
+        checkMapSer(st3);
 
         StatelyState st4 = st3.withNumber(3);
         assertEquals(3, st4.number(), st4::toString);
         assertEquals(32, st4.age(), st4::toString);
         assertTrue(st4.isCool(), st4::toString);
+        checkMapSer(st4);
 
         StatelyState st5 = st4.withThing(Things.FEATHER_BARBULES);
         assertEquals(3, st5.number(), st5::toString);
         assertEquals(32, st5.age(), st5::toString);
         assertTrue(st5.isCool(), st5::toString);
         assertSame(Things.FEATHER_BARBULES, st5.thing(), st5::toString);
+        checkMapSer(st5);
 
         for (int i = 0; i < Things.values().length; i++) {
             Things t = Things.values()[i];
@@ -94,5 +100,58 @@ public class AtomicStateTest {
             assertSame(Things.DARTH_VADER, old.thing(), old::toString);
             assertSame(Things.CLOUDS, nue.thing(), nue::toString);
         });
+
+        checkMapSer(gau);
+    }
+
+    static void checkMapSer(StatelyState state) {
+        Map<String, Object> m = state.toMap();
+        
+        assertNotNull(m, state + " -> " + m);
+        assertFalse(m.isEmpty(), state + " -> " + m);
+        StatelyState nue = StatelyState.fromMap(m);
+
+        assertNotNull(nue, "Got null from fromMap.");
+        assertEquals(state, nue, "Map conversion was inconsistent - "
+                + state + " -> " + nue);
+
+        m.put("wurb", 23);
+        m.put("glorg", new StringBuilder("foo"));
+        m.put("kunkles", "hello");
+
+        StatelyState nue2 = StatelyState.fromMap(m);
+        assertEquals(state, nue2, "Map conversion with unknown values was inconsistent - "
+                + state + " -> " + nue);
+
+        Wrapper wrapper = new Wrapper(state);
+
+        StatelyState unwrapped = StatelyState.from(wrapper);
+        assertNotSame(state, unwrapped);
+        assertEquals(state, unwrapped);
+    }
+
+    static class Wrapper implements Stately {
+
+        private final StatelyState delegate;
+
+        public Wrapper(StatelyState delegate) {
+            this.delegate = delegate;
+        }
+
+        public short age() {
+            return delegate.age();
+        }
+
+        public boolean isCool() {
+            return delegate.isCool();
+        }
+
+        public byte number() {
+            return delegate.number();
+        }
+
+        public Things thing() {
+            return delegate.thing();
+        }
     }
 }

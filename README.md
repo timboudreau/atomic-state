@@ -19,6 +19,10 @@ that - and perhaps to respond to changes in it - without involving any locks.  E
     * Whether or not a dialog is open
     * Whether or not the application is exiting
     * A relative, low resolution timestamp of the last poll time
+  * Managing complex state for an HTTP client, composing together states like
+    * What phase of handling the request the code is in (initial, headers-sent, body-sent,
+      headers-received, receiving-body, body-received, done) along with
+    * If the request is done, the reason (success, error-code-response, cancelled, timed-out, errored)
 
 To do that, you simply do the fussy work of carving up an int or a long into some number of bits,
 allocate one bit to booleans, however many bits it takes to hold the element count of enums, however
@@ -81,13 +85,13 @@ just the code you want to generate:
         <dependency>
             <groupId>com.mastfrog.atomicstate</groupId>
             <artifactId>atomic-state</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.mastfrog.atomicstate</groupId>
             <artifactId>atomic-state-annotation-processor</artifactId>
-            <version>1.0.0</version>
+            <version>1.0.1</version>
             <scope>provided</scope>
         </dependency>
 
@@ -107,6 +111,27 @@ that range is enforced as well.  So, usage looks like
 StatelyState myState = StatelyState.INITIAL.withIsCool(true).withAge(23).withNumber(10)
 ```
 
+The generated implementation of your state interface will have the following added methods:
+
+ * `with*(value)` (where `*` is the capitalized name of the original method) methods which take a value of 
+    of the type returned by the original method, which returns a new instance of the generated
+    class with that value set to the passed value (or returns the same instance if the passed
+    value is not different from the requested one)
+ * `static from(YourInterface)` - takes an instance of your interface which might not be an instance of
+    the generated type, and converts it to one if necessary
+ * `equals(Object)`, `toString()` and `hashCode()` that work as one would expect
+ * `toMap()` - returns a `Map<String,Object>` representing the contents of your object as key/value pairs
+    (that can be useful if you're going to serialize an instance and reconsititute it much later in
+    a JVM that may have a different version of your class with added or removed methods)
+ * `static fromMap(Map<String, Object>)` which reverses what `toMap()` does, and tolerates
+    unknown keys, strings for enums and/or `ints` where `longs` are expected and similar.
+ * A factory method, `new$THE_GENERATED_TYPE_NAME` which takes either an `int` or `long` depending
+   on the number of bits required.
+    * Note, **all** constructed instances are validated on construction, and will throw an
+      `IllegalArgumentException` if the input value, say, requests an enum constant greater than
+      the number of enum constants in an enum type, or out of range with respect to any `@ValueRange`
+      annotation - so it is impossible to create an instance that is in a nonsensical state.
+
 The **other** thing you get is a `*StateHolder` class, which encapsulates an `AtomicInteger` or `AtomicLong`
 and provides atomic methods `getAndUpdate(UnaryOperator<YourState>)`, `updateAndGet(UnaryOperator<YourState>)`
 and `set(YourState)`.
@@ -125,6 +150,50 @@ or `ForkJoinPool.commonPool`.  It will have a signature like
 Since this *is* lockless and atomic, depending on what you're doing, you may want to use the `Supplier` to
 get the state right now (if, say, you're updating a UI element) or use `changedToState` (if, say, you're
 logging every state transition).
+
+For example, here is a usage where an atomic state implementation is being used to carefully manage
+the reported state of a web service request, which has a `CompletableFuture` it needs to
+notify with a JSON representation of a the response, once the request cycle has ended - this
+is in an implementation of `HttpResponse.BodyHandler.onError` for the JDK's HTTP client - which
+is an example of a case where you have multiple threads banging unpredictably on some state:
+
+```
+    @Override
+    public void onError(Throwable throwable) {
+        HttpOperationState prevState = state.getAndUpdate(old -> 
+            old
+                .withState(State.DONE)
+                .withReason(CompletionReason.ERRORED)
+        );
+        // If the future was not completed, complete it now
+        if (!prevState.futureCompleted()) {
+            completeFuture(ServiceResult.thrown(throwable));
+        }
+    }
+```
+
+Limitiations
+============
+
+The return types of methods on the interface you annotate with `@AtomicState` **must**
+be primitive types, and the total number of bits required must be less than or equal
+to 64 (hint: use `@ValueRange` to reduce the number of bits needed if there is a
+maximum practical value, you don't ever need to represent a negative number, etc.).
+
+Enums consume as many bits as it takes to represent the highest ordinal - the count
+of enum constants present.
+
+
+Future Plans
+============
+
+  * Returning `long` is currently not supported, since that would consume all 64 bits
+of an AtomicLong in one shot.  It ought to be allowed if `@ValueRange` is present and
+the result would fit in less than 64 bits.
+  * State implementation classes implement `Serializable`, but if the interface changes,
+the result will be incompatible.  This could be improved by implementing `Externalizable`
+directly or indirectly instead, and instead writing a `Map<String,Object>` with named values
+to the output stream.  For now, use `toMap` and `fromMap` for this purpose.
 
 
 Conclusion
