@@ -108,22 +108,33 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                     handleItem(item, roundEnv, anno);
                 });
 
-        if (roundEnv.processingOver()) {
-            try {
-                for (Map.Entry<TypeElement, StateModel> e : models.entrySet()) {
-                    ClassBuilder<String> cb = e.getValue().generator().sortMembers();
-                    Filer filer = utils.processingEnv().getFiler();
-                    try {
-                        JavaFileObject src = filer.createSourceFile(cb.fqn(), e.getKey());
-                        try ( OutputStream out = src.openOutputStream()) {
-                            out.write(cb.build().getBytes(UTF_8));
-                        }
-                    } catch (IOException ex) {
-                        utils.fail(ex + "", e.getKey());
-                        ex.printStackTrace();
+        try {
+            for (Map.Entry<TypeElement, StateModel> e : models.entrySet()) {
+                ClassBuilder<String> cb = e.getValue().generator().sortMembers();
+                Filer filer = utils.processingEnv().getFiler();
+                try {
+                    JavaFileObject src = filer.createSourceFile(cb.fqn(), e.getKey());
+                    try ( OutputStream out = src.openOutputStream()) {
+                        out.write(cb.build().getBytes(UTF_8));
                     }
+                } catch (IOException ex) {
+                    utils.fail(ex + "", e.getKey());
+                    ex.printStackTrace();
+                }
 
-                    cb = e.getValue().generateStateHolder().sortMembers();
+                cb = e.getValue().generateStateHolder().sortMembers();
+                try {
+                    JavaFileObject src = filer.createSourceFile(cb.fqn(), e.getKey());
+                    try ( OutputStream out = src.openOutputStream()) {
+                        out.write(cb.build().getBytes(UTF_8));
+                    }
+                } catch (IOException ex) {
+                    utils.fail(ex + "", e.getKey());
+                    ex.printStackTrace();
+                }
+                cb = e.getValue().generateListener();
+                if (cb != null) {
+                    cb.sortMembers();
                     try {
                         JavaFileObject src = filer.createSourceFile(cb.fqn(), e.getKey());
                         try ( OutputStream out = src.openOutputStream()) {
@@ -132,24 +143,11 @@ public class AtomicStateAnnotationProcessor extends AbstractProcessor {
                     } catch (IOException ex) {
                         utils.fail(ex + "", e.getKey());
                         ex.printStackTrace();
-                    }
-                    cb = e.getValue().generateListener();
-                    if (cb != null) {
-                        cb.sortMembers();
-                        try {
-                            JavaFileObject src = filer.createSourceFile(cb.fqn(), e.getKey());
-                            try ( OutputStream out = src.openOutputStream()) {
-                                out.write(cb.build().getBytes(UTF_8));
-                            }
-                        } catch (IOException ex) {
-                            utils.fail(ex + "", e.getKey());
-                            ex.printStackTrace();
-                        }
                     }
                 }
-            } finally {
-                models.clear();
             }
+        } finally {
+            models.clear();
         }
         return true;
     }
