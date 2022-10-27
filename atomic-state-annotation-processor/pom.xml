@@ -5,7 +5,7 @@
     <parent>
         <groupId>com.mastfrog.atomicstate</groupId>
         <artifactId>atomic-state-parent</artifactId>
-        <version>1.0.2</version>
+        <version>1.0.4</version>
     </parent>
 
     <artifactId>atomic-state-annotation-processor</artifactId>
@@ -21,7 +21,7 @@
         <dependency>
             <groupId>com.mastfrog</groupId>
             <artifactId>java-vogon</artifactId>
-            <version>${mastfrog.version}</version>
+            <version>${java-vogon.version}</version>
         </dependency>
         <dependency>
             <groupId>com.mastfrog</groupId>
