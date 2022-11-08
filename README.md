@@ -202,7 +202,8 @@ Conclusion
 This is definitely a tool to solve a somewhat esoteric problem, but it's one that, when you have it, is
 fussy to implement and easy to make mistakes with.  So, if you want to do old-school, highly efficient
 state management, and your state can be shoehorned into <= 64 bits, but have your code walk and talk like
-modern object-oriented code, you can do that.
+modern object-oriented code, this library lets you do that without the knotty task of implementing a
+lot of bitwise logic.
 
 Could you do some of this with a lock and a hand-written state object?  Sure, but there is risk of deadlock.
 
@@ -211,4 +212,3 @@ an `int` or `long` is about as cheap as it gets) and doing your coalescing by ha
 
 It's not for everything, or even most things, but if you have the problem it solves, it is really nice to have
 a solution to it.
-
