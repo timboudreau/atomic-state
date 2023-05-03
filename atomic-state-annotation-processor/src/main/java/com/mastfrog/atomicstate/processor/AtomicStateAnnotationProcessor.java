@@ -82,7 +82,7 @@ import javax.tools.JavaFileObject;
  */
 @ServiceProvider(Processor.class)
 @SupportedAnnotationTypes(ATOMIC_STATE_ANNO)
-@SupportedSourceVersion(SourceVersion.RELEASE_8)
+@SupportedSourceVersion(SourceVersion.RELEASE_17)
 public class AtomicStateAnnotationProcessor extends AbstractProcessor {
 
     private static final long SER_VERSION = 0;
